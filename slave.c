@@ -32,6 +32,16 @@ void main(void){
 	P2OUT &= (BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
 	P2DIR |= (BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
 	
+	P1SEL  =   BIT2    |   BIT4		|	BIT5;	//enable UCA0 MOSI, Clock, SS
+	P1SEL2 =   BIT2    |   BIT4		|	BIT5;
+
+	UCA0CTL1   =   UCSWRST;
+	UCA0CTL0   |=  UCCKPH  +   UCMSB + UCSYNC + UCMODE_1; //  4-pin, SS high enabled,  8-bit SPI slave
+	UCA0CTL0 	&= ~UCMST;
+	UCA0BR0    |=  0x00;   //don't prescale Baud rate
+	UCA0BR1    =   0;  //don't prescale Baud rate
+	UCA0MCTL   =   0;  //  No  modulation
+	UCA0CTL1   &=  ~UCSWRST;   //  **Initialize    USCI    state   machine**
 
 	BCSCTL3 |= LFXT1S_2;					// Set clock source to VLO
 //	_BIS_SR(LPM3_bits + GIE);				// Set clock mode to LPM3, and enable interrupts
