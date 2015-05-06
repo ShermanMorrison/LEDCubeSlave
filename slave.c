@@ -1,15 +1,15 @@
 /*
  * PWM Control of an LED Matrix layer.
  */
-
+#include <stdint.h>
 #include <msp430g2553.h>		//must include so compiler knows what each variable means
 
 const int led_num_cycles = 12;
-const char col_array[5] = {BIT0, BIT3, 0x00, BIT6, BIT7};
-const char row_array[5] = {BIT0, BIT1, BIT2, BIT3, BIT4};
-int pwm_array[5][5] = {
-		{0,			0,		0,		0,		0},
-		{0,			0,		0,		0,		0},
+const uint8_t col_array[5] = {BIT0, BIT3, 0x00, BIT6, BIT7};
+const uint8_t row_array[5] = {BIT0, BIT1, BIT2, BIT3, BIT4};
+uint8_t pwm_array[5][5] = {
+		{0,			0,		 0,		0,		0},
+		{0,			0,		 0,		0,		0},
 		{0,			0,		 0, 	0,		0},
 		{0,			0,		 0,		0,		0},
 		{0,			0,		 0,		0,		0}
@@ -22,82 +22,51 @@ void clear_all();
 void main(void){
 
 	WDTCTL = WDTPW + WDTHOLD;	// Stop WDT
-//	IE1 = WDTIE;
-//	WDTCTL = WDT_ADLY_16;
 
+	BCSCTL3 |= LFXT1S_2;					// Set clock source to VLO (only option-- don't have external oscillator)
+	BCSCTL1 |= DIVA_0;						// ACLK is sourced on VLO by default. Run at 12KHz.
+	BCSCTL2 |= SELM_3 + SELS + DIVM_0;   	// SMCLK  = MCLK = VLO = 12KHz
 
-	P1OUT &= (BIT0 + BIT3 + BIT6 + BIT7);
+	P1OUT &= ~(BIT0 + BIT3 + BIT6 + BIT7);
 	P1DIR |= (BIT0 + BIT3 + BIT6 + BIT7);
 
-	P2OUT &= (BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
-	P2DIR |= (BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
-	
-	P1SEL  =   BIT2    |   BIT4		|	BIT5;	//enable UCA0 MOSI, Clock, SS
-	P1SEL2 =   BIT2    |   BIT4		|	BIT5;
+	P2OUT &= ~(BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
+	P2DIR |= (BIT5 + BIT0 + BIT1 + BIT2 + BIT3 + BIT4 + BIT7);
 
-	UCA0CTL1   =   UCSWRST;
-	UCA0CTL0   |=  UCCKPH  +   UCMSB + UCSYNC + UCMODE_1; //  4-pin, SS high enabled,  8-bit SPI slave
-	UCA0CTL0 	&= ~UCMST;
-	UCA0BR0    |=  0x00;   //don't prescale Baud rate
-	UCA0BR1    =   0;  //don't prescale Baud rate
-	UCA0MCTL   =   0;  //  No  modulation
-	UCA0CTL1   &=  ~UCSWRST;   //  **Initialize    USCI    state   machine**
+	while (!(P1IN & BIT4));                   // If clock sig from mstr stays low,
+											// it is not yet in SPI mode
 
-	BCSCTL3 |= LFXT1S_2;					// Set clock source to VLO
-//	_BIS_SR(LPM3_bits + GIE);				// Set clock mode to LPM3, and enable interrupts
-//	__enable_interrupt();
-	BCSCTL2 |= SELM_3 + SELS;          		// SMCLK  = MCLK = VLO = 12KHz
+	P1SEL  =   BIT1 	|BIT2    |   BIT4	| BIT5;	//enable UCA0 transmit and clock
+	P1SEL2 =   BIT1 	|	BIT2    |   BIT4	| BIT5;
+	UCA0CTL1 = UCSWRST;                       // **Put state machine in reset**
+	UCA0CTL0 |= UCCKPL + UCMSB + UCSYNC + UCMODE_1;      // 3-pin, 8-bit SPI master
+	UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
+	IE2 |= UCA0RXIE;                          // Enable USCI0 RX interrupt
 
-//	BCSCTL1 |= DIVA0;						// Divide ACLK (sourced by VLO) by 2 to get 6KHz clock ...
-//	BCSCTL1 &= ~(DIVA0);					// cont.
-
-//	IFG1 &= ~OFIFG;                     	// Clear OSCFault flag
-
-	//__enable_interrupt();		//global interrupt enable
-
+	__bis_SR_register(GIE);       // Enter LPM4, enable interr
 
 	while(1){
 
-		int c; // global intensity setting, later will be an array with 25 (5x5) elements
-		int j; // cycle index running from 0 to 15
-		int k;
 
-		// set the control array
-		int row,col;
-		int nextRow [5];
-		for (col=0;col<5;col++)
-			nextRow[col] = pwm_array[4][col];
-		for (row=4;row>0;row--){
-			for (col=0;col<5;col++)
-				pwm_array[row][col] = pwm_array[row-1][col];
-		}
-		for (col=0;col<5;col++)
-			pwm_array[0][col] = nextRow[col];
 
-//		pwm_array[0][1] = 10 - pwm_array[0][1];
-		// set the led matrix to a state for 1000 iterations
+		int c; // column index
+		int j; // pwm counter
 
-		while (spi_index < 25){
-			while  (!(IFG2 &   UCA0RXIFG));    //  USCI_A0 RX  buffer  ready?
-			pwm_array[spi_index / 5][spi_index % 5] = UCA0RXBUF;
-			spi_index++;
-		}
+		for (c=0; c<5; c++){
 
-		int index;
-		for (index=0; index<5;index++){
-			for (k=0;k<1; k++){
-				for (c=0; c<5; c++){
-					for (j=0; j<led_num_cycles; j++){
-						//PWM all lights
-						set_column(c,j);
+			for (j=0; j<led_num_cycles; j++){
 
-		//				_BIS_SR(LPM3_bits);	//enter low-power mode.
-					}
-					//clear element (column goes low, desired rows go high)
-					clear_all();
-				}
+				set_column(c,j); 	//PWM all lights
+
 			}
+			__delay_cycles(1000);
+			clear_all();			//clear element (column goes low, desired rows go high)
+			__delay_cycles(1000);
 		}
+
+		//TO REMOVE
+
+
 	}
 
 }
@@ -108,32 +77,39 @@ void set_column(int c, int j){
 	/////////
 	//COLUMN
 	//
+	int col_mask = 0;
 
-	P1OUT &= ~(BIT0 + BIT3 + BIT6 + BIT7);			//set all columns low
-	P2OUT &= ~BIT5; 	//cont.
+
+//	col_mask &= ~(BIT0 + BIT3 + BIT6 + BIT7);			//set all columns low
 
 	//set appropriate column high
-	if (col_array[c] == 0)
+	if (col_array[c] == 0){
 		P2OUT |= BIT5;
-	else
-		P1OUT |= col_array[c];
-
+		P1OUT &= ~(BIT0 + BIT3 + BIT6 + BIT7);
+	}
+	else{
+		col_mask |= col_array[c];
+		P1OUT = col_mask;
+		P2OUT &= ~BIT5;
+	}
 	///////
 	//ROWS
 	//
 
-	P2OUT |= (BIT0 + BIT1 + BIT2 + BIT3 + BIT4); // set all rows high.
+	int row_mask_on = (BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
+
+//	P2OUT |= (BIT0 + BIT1 + BIT2 + BIT3 + BIT4); // set all rows high.
 
 	// set desired rows low. This is where the PWM happens.
 	int r;
 	for (r=0;r<5;r++){
-			if (j < pwm_array[r][c]){
-				P2OUT &= ~(row_array[r]);	//set row low
-			}
-			else{
-				P2OUT |= row_array[r];		//set row high
+			if (j < (int) pwm_array[r][c]){
+				row_mask_on &= ~(row_array[r]);	//set row low
+				P2OUT &= ~row_array[r];
 			}
 	}
+
+	P2OUT |= row_mask_on;
 }
 
 
@@ -141,23 +117,36 @@ void set_column(int c, int j){
 void clear_all(){
 	// Must have 0 <= r,c < 5
 
-	///////////////////
-	//FIRST SET ROWS!
-	//
-	P2OUT |= 0xFFEF; //don't set pin 2.5 (column 2)
 
-	//////////////////
-	//NOW CLEAR COLUMNS
-	//
-	P1OUT  &= ~(BIT0 + BIT3 + BIT6 + BIT7);
-	P2OUT &= ~BIT5; 	//cont.
+	P1OUT &= ~(BIT0 + BIT3 + BIT6 + BIT7);
+	P2OUT &= ~BIT5;
+	P2OUT |= (BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
+
+
+//	///////////////////
+//	//FIRST SET ROWS!
+//	//
+//	P2OUT |= 0xFFEF; //don't set pin 2.5 (column 2)
+//
+//	//////////////////
+//	//NOW CLEAR COLUMNS
+//	//
+//	P1OUT  &= ~(BIT0 + BIT3 + BIT6 + BIT7);
+//	P2OUT &= ~BIT5; 	//cont.
 
 }
 
-#pragma vector = WDT_VECTOR   //says that the interrupt that follows will use the "TIMER0_A0_VECTOR" interrupt
-__interrupt void WDT_Interrupt(void){     //can name the actual function anything
 
-	_bic_SR_register_on_exit(LPM3_bits);
+#pragma vector=USCIAB0RX_VECTOR
+__interrupt void USCI0RX_ISR (void)
+{
+	uint8_t in = UCA0RXBUF;
+	*((uint8_t*)pwm_array + spi_index) = in;	//read receive buffer
+
+	spi_index++;
+
+	if (spi_index > 24)
+		spi_index = 0;
 }
 
 
