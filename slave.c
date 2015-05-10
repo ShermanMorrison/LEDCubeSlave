@@ -141,7 +141,9 @@ void clear_all(){
 __interrupt void USCI0RX_ISR (void)
 {
 	uint8_t in = UCA0RXBUF;
-	*((uint8_t*)pwm_array + spi_index) = in;	//read receive buffer
+
+//	if (in != 0)
+		*((uint8_t*)pwm_array + spi_index) = in;	//read receive buffer
 
 	spi_index++;
 
